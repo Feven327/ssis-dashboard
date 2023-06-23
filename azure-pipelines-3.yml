@@ -1,0 +1,47 @@
+trigger:
+
+- none
+
+
+
+environment:
+
+        name: REPRO
+
+        resourceType: VirtualMachine
+
+  
+
+ strategy:
+
+        runOnce:
+
+          deploy:
+
+            steps:
+
+             - task: SSISCatalog@0
+
+              displayName: SSIS Catalog Configuration
+              inputs:
+                configSource: 'inline'
+
+                configContent: |
+
+                  {
+
+                    "folders": [
+
+                      {
+
+                        "name": "MIS",
+
+                        "description": ""}]
+
+                        }
+
+                         rollBackOnError: true
+
+                targetServer: 'localhost'
+
+                authType: 'win'
