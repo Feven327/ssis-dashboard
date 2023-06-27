@@ -1,0 +1,59 @@
+{
+  "folders": [
+    {
+      "name": "devopsdemo",
+      "description": "devops demo folder",
+      "projects": [
+        {
+          "name": "catalog devops",
+          "parameters": [
+            {
+              "name": "password",
+              "container": "Package.dtsx",
+              "value": "passwd",
+              "valueType": "referenced"
+            },
+            {
+              "name": "serverName",
+              "container": "catalog devops",
+              "value": "localhost",
+              "valueType": "literal"
+            }
+          ],
+          "references": [
+            {
+              "environmentName": "test",
+              "environmentFolder": "devopsdemo"
+            },
+            {
+              "environmentName": "test",
+              "environmentFolder": "."
+            }
+          ]
+        }
+      ],
+      "environments": [
+        {
+          "name": "test",
+          "description": "test",
+          "variables": [
+            {
+              "name": "passwd",
+              "type": "string",
+              "description": "",
+              "value": "$(SSISDBServerAdminPassword)",
+              "sensitive": true
+            },
+            {
+              "name": "serverName",
+              "type": "string",
+              "description": "",
+              "value": "$(TargetServerName)",
+              "sensitive": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
