@@ -1,0 +1,21 @@
+SSISCatalog@0
+            displayName: SSIS Catalog Configuration
+            continueOnError: true
+            inputs:
+              configSource: 'inline'
+              configContent: |
+                {
+                  "folders": [
+                    {
+                      "name": "MIS",
+                      "description": "",
+                      "projects": [
+                        {
+                          "name": "OracleToSQL",
+                          "parameters": [
+                            {
+                                "name": "ExponentHRMIS_ServerName",
+                                "container": "OracleToSQL",
+                                "value": "ExponentHRMIS_ServerName",
+                                "valueType": "referenced"
+                            },
