@@ -1,0 +1,357 @@
+#azure-pipelines.yml
+
+trigger:
+- none
+
+pool:
+  name: 'BuildSQL'
+
+variables:
+  - name: 'BuildPlatform'
+    value: 'Any CPU'
+  - name: 'BuildConfiguration'
+    value: 'Release'
+  - name: Projects
+    value: 'OracleToSQL/OracleToSQL.dtproj'
+
+stages:
+  - stage: Build
+    displayName: Build
+    jobs:
+    - job: BuildSSIS
+      displayName: Build SSIS Project
+      steps:
+      - task: SSISBuild@1
+        displayName: Build SSIS Solution
+        inputs:
+          projectPath: '$(Projects)'
+          stripSensitive: false
+          outputPath: '$(Build.ArtifactStagingDirectory)'
+      - task: PublishBuildArtifacts@1
+        displayName: Publish Artifact
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Artifact: SQLAgent'
+        inputs:
+          PathtoPublish: 'SQLAgent'
+          ArtifactName: 'SQLAgent'
+          publishLocation: 'Container'
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Artifact: Security'
+        inputs:
+          PathtoPublish: 'Security'
+          ArtifactName: 'Security'
+          publishLocation: 'Container'
+
+  - stage: DeployNonLive
+    variables:
+      - group: Development SSIS Oracle to SQL
+      - name: SSISEnvironment
+        value: Development
+      - name: ADGroup
+        value: 'LACERTETECH\Dev db_ssisoperator'
+      - name: ExponentHRMISServer
+        value: 'ehrdevsql01'
+    displayName: Non-Live
+    dependsOn: Build
+    jobs:
+    - deployment: DeploySSIS
+      displayName: Deploy SSIS Package
+      workspace:
+        clean: all
+      environment:
+        name: Non-Live SSIS
+        resourceType: VirtualMachine
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: SSISDeploy@1
+              displayName: SSIS Deploy
+              inputs:
+                sourcePath: '$(Pipeline.Workspace)\drop\OracleToSQL.ispac'
+                destinationType: 'ssisdb'
+                destinationServer: 'localhost'
+                destinationPath: '/SSISDB/MIS/OracleToSQL'
+                authType: 'win'
+                whetherOverwrite: 'yes'
+                whetherContinue: 'no'
+            - task: SSISCatalog@0
+              displayName: SSIS Catalog Configuration
+              continueOnError: true
+              inputs:
+                configSource: 'inline'
+                configContent: |
+                  {
+                    "folders": [
+                      {
+                        "name": "MIS",
+                        "description": "",
+                        "projects": [
+                          {
+                            "name": "OracleToSQL",
+                            "parameters": [
+                              {
+                                  "name": "ExponentHRMIS_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "ExponentHRMIS_ServerName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_ServerName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_UserName",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_UserName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_Password",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_Password",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MISMasterTax_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "MISMasterTax_ServerName",
+                                  "valueType": "referenced"
+                              }
+                            ],
+                            "references": [
+                              {
+                                "environmentName": "$(SSISEnvironment)",
+                                "environmentFolder": "."
+                              }
+                            ]
+                          }
+                        ],
+                        "environments": [
+                          {
+                            "name": "$(SSISEnvironment)",
+                            "description": "",
+                            "variables": [
+                              {
+                                  "name": "ExponentHRMIS_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(ExponentHRMIS_ServerName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_ServerName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_UserName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_UserName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_Password",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_Password)",
+                                  "sensitive": true
+                              },
+                              {
+                                  "name": "MISMasterTax_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MISMasterTax_ServerName)",
+                                  "sensitive": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                rollBackOnError: true
+                targetServer: 'localhost'
+                authType: 'win'
+            - task: SqlDacpacDeploymentOnMachineGroup@0
+              displayName: 'Create SQL Agent Job'
+              inputs:
+                TaskType: 'sqlQuery'
+                SqlFile: '$(Pipeline.Workspace)\SQLAgent\SSISOracleToSQLJob.sql'
+                ServerName: 'localhost'
+                DatabaseName: 'msdb'
+                AuthScheme: 'windowsAuthentication'
+                AdditionalArgumentsSql: -Variable @("ExponentHRMISServer = $(ExponentHRMISServer)")
+            - task: SqlDacpacDeploymentOnMachineGroup@0
+              displayName: 'Configure Security for db_ssisoperator'
+              inputs:
+                TaskType: 'sqlQuery'
+                SqlFile: '$(Pipeline.Workspace)\Security\Add_db_ssisoperator.sql'
+                ServerName: 'localhost'
+                DatabaseName: 'SSISDB'
+                AuthScheme: 'windowsAuthentication'
+                AdditionalArgumentsSql: -Variable @("ADGroup = $(ADGroup)")
+
+  - stage: DeployLive
+    variables:
+      - group: Live SSIS Oracle to SQL
+      - name: SSISEnvironment
+        value: Live
+      - name: ADGroup
+        value: 'LACERTETECH\Live m01 db_ssisoperator'
+      - name: ExponentHRMISServer
+        value: 'ehrlivesqlm01'
+    displayName: Live
+    dependsOn: DeployNonLive
+    jobs:
+    - deployment: DeploySSIS
+      displayName: Deploy SSIS Package
+      workspace:
+        clean: all
+      environment:
+        name: Live SSIS
+        resourceType: VirtualMachine
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: SSISDeploy@1
+              displayName: SSIS Deploy
+              inputs:
+                sourcePath: '$(Pipeline.Workspace)\drop\OracleToSQL.ispac'
+                destinationType: 'ssisdb'
+                destinationServer: 'localhost'
+                destinationPath: '/SSISDB/MIS/OracleToSQL'
+                authType: 'win'
+                whetherOverwrite: 'yes'
+                whetherContinue: 'no'
+            - task: SSISCatalog@0
+              displayName: SSIS Catalog Configuration
+              continueOnError: true
+              inputs:
+                configSource: 'inline'
+                configContent: |
+                  {
+                    "folders": [
+                      {
+                        "name": "MIS",
+                        "description": "",
+                        "projects": [
+                          {
+                            "name": "OracleToSQL",
+                            "parameters": [
+                              {
+                                  "name": "ExponentHRMIS_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "ExponentHRMIS_ServerName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_ServerName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_UserName",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_UserName",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MasterTax_Password",
+                                  "container": "OracleToSQL",
+                                  "value": "MasterTax_Password",
+                                  "valueType": "referenced"
+                              },
+                              {
+                                  "name": "MISMasterTax_ServerName",
+                                  "container": "OracleToSQL",
+                                  "value": "MISMasterTax_ServerName",
+                                  "valueType": "referenced"
+                              }
+                            ],
+                            "references": [
+                              {
+                                "environmentName": "$(SSISEnvironment)",
+                                "environmentFolder": "."
+                              }
+                            ]
+                          }
+                        ],
+                        "environments": [
+                          {
+                            "name": "$(SSISEnvironment)",
+                            "description": "",
+                            "variables": [
+                              {
+                                  "name": "ExponentHRMIS_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(ExponentHRMIS_ServerName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_ServerName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_UserName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_UserName)",
+                                  "sensitive": false
+                              },
+                              {
+                                  "name": "MasterTax_Password",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MasterTax_Password)",
+                                  "sensitive": true
+                              },
+                              {
+                                  "name": "MISMasterTax_ServerName",
+                                  "type": "string",
+                                  "description": "",
+                                  "value": "$(MISMasterTax_ServerName)",
+                                  "sensitive": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                rollBackOnError: true
+                targetServer: 'localhost'
+                authType: 'win'
+            - task: SqlDacpacDeploymentOnMachineGroup@0
+              displayName: 'Create SQL Agent Job'
+              inputs:
+                TaskType: 'sqlQuery'
+                SqlFile: '$(Pipeline.Workspace)\SQLAgent\SSISOracleToSQLJob.sql'
+                ServerName: 'localhost'
+                DatabaseName: 'msdb'
+                AuthScheme: 'windowsAuthentication'
+                AdditionalArgumentsSql: -Variable @("ExponentHRMISServer = $(ExponentHRMISServer)")
+            - task: SqlDacpacDeploymentOnMachineGroup@0
+              displayName: 'Configure Security for db_ssisoperator'
+              inputs:
+                TaskType: 'sqlQuery'
+                SqlFile: '$(Pipeline.Workspace)\Security\Add_db_ssisoperator.sql'
+                ServerName: 'localhost'
+                DatabaseName: 'SSISDB'
+                AuthScheme: 'windowsAuthentication'
+                AdditionalArgumentsSql: -Variable @("ADGroup = $(ADGroup)")
